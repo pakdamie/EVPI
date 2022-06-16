@@ -1,0 +1,549 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+This is the RMarkdown for Pak et al. Covid Paper. This has been now revised to have a newer methodology where I use priors instead of baseline value. Last edited on 6/3/2022
+
+
+```{r}
+
+###Packages needed
+library(here)
+library(ggplot2) #Plotting
+library(deSolve) #Differential equation solver
+library(viridis) #Color palette
+library(patchwork) #plot arranger
+
+###The Full Desolve Model is Here (This is the basis
+###of everything, please use)
+source("Model/FULL_MODEL_COVID19.R")
+
+###The Simulator- which allows me to put in different
+###parameter values to run the model is here
+source("Model/Simulator_MODEL.R")
+
+###Figure 2 Maker: Output Calculater/Grapher
+source("output_related.R")
+
+###EVPI (Single Uncertainty)
+source("EVPI_SIMPLE_related.R")
+
+###This is for the permutation of country/demography
+source('Simulator_Cases_NewPriors.R')
+source('Minimizer_higherlighter2.R')
+###Demography and contact matrices - From Ruiyun Li
+
+
+
+
+###USA
+load("Demography/D_USA.RData")
+load("Demography/W_USA.RData")
+W_USA[W_USA < 0 ]<-0
+
+###JAPAN
+load("Demography/D_JPN.RData")
+load("Demography/W_JPN.RData")
+W_JPN[W_JPN < 0 ]<-0
+
+###SOUTH AFRICA
+load("Demography/D_SAF.RData")
+load("Demography/W_SAF.RData")
+W_SAF[W_SAF < 0 ]<-0
+
+###Normalize these to 1
+D_JPN <- D_JPN/(sum(D_JPN))
+###Normalize these to 1
+D_SAF <- D_SAF/(sum(D_SAF))
+
+
+###For analysis of EVPI for total country
+source('EVPI_ALL.R')
+load("TSS_ALL_CREATOR/TSS_JPN_ALL.RData")
+load("TSS_ALL_CREATOR/TSS_US_ALL.RData")
+load("TSS_ALL_CREATOR/TSS_SAF_ALL.RData")
+```
+
+###Susceptibility
+This is the parameter where we assume that the vaccine reduces the susceptibility- that is by a high reduction (0.1- 90% reduction for the baseline transmission), medium reduction (0.5 - 50% reduction), and no reduction (1 - 0% reduction). This parameter is only found on the vaccinated FOI.
+
+```{r Susceptibility_Simulation Parameters}
+sus_l_h <-   c(0.10, 0.5, 1) #Values of susceptibility
+trans_l_h <- c(0.10,0.5,1) #Values of transmissibility
+sev_l_h  <- c(0.1, 0.25, 0.5) #Values of severity
+WN_l_h <- c(0, 0.5, 1, 2) #Values of the waning of immunity 
+WV1_l_h <- c(0, 0.5, 1, 2) #Values of the waning of vaccine immunity 1
+WV2_l_h <- c(0, 0.5, 1, 2) #Values of the waning of vaccine immunity 1
+
+###Creating the priors 
+
+###Eaual priors for the first three uncertainties, 
+###we use 1/3 
+Equal_Priors_3 <- c(1/3,1/3,1/3)
+Equal_Priors_4 <- c(1/4,1/4,1/4,1/4)
+
+Worst_Priors_3 <- c(0.10, 0.15, 0.75)
+Worst_Priors_4 <- c(0.05, 0.05, 0.15, 0.75)
+
+Best_Priors_3 <- c(0.75,0.15,0.10)
+Best_Priors_4 <- c(0.75,0.15,0.05,0.05)
+
+###
+Equal_DF <- cbind.data.frame(
+  id = c(rep(c('sus','trans','sev'), each =3),
+       rep(c('wn','wv1','wv2'), each=4)),
+  value=  as.numeric(c(sus_l_h, trans_l_h, sev_l_h,
+  WN_l_h , WV1_l_h, WV2_l_h)),
+  priors = c(rep(Equal_Priors_3,3),
+             c(rep(Equal_Priors_4,3)))
+)
+         
+EQUAL_SINGLE <- Simulator_Cases_NewPriors(Equal_DF)
+EQUAL_SINGLE_DF <-Simulator_Cases_NewPriors_DF(Equal_DF)
+
+EQUAL_OUTPUT =NULL 
+for (k in seq(1,6)){
+  tmp = EQUAL_SINGLE[[k]]
+  tmp_df =EQUAL_SINGLE_DF [[k]]
+ 
+  tmp_output <- Output_Calculator(tmp, tmp_df,1)
+  colnames(tmp_output)[7:11] <- c(    "vacrate","vacall",'inc','R0','country')
+  
+  
+  EQUAL_OUTPUT [[k]]=tmp_output
+}
+
+```
+
+
+```{r}
+SUS_OUTPUT_GG <- grapher_output(
+ x= Minimizer_Highlighter(EQUAL_OUTPUT[[1]],'sus'),'sus','not')
+
+(SUS_OUTPUT_GG[[1]]+ ggtitle("Susceptibility: Total Cases per 100,000 (Japan) "))/
+(SUS_OUTPUT_GG[[2]]+ ggtitle("Susceptibility: Total Cases per 100,000 (South Africa) "))/
+(SUS_OUTPUT_GG[[3]]+ ggtitle("Susceptibility:Total Cases per 100,000 (United States) "))
+
+ggsave(
+  "SUS_CASES_JSU.png",
+  width = 10,
+  height = 14,
+  units = c("in"),
+  dpi = 300)
+
+(SUS_OUTPUT_GG[[4]]+ ggtitle("Susceptibility: Total Mortality per 100,000 (Japan) "))/
+(SUS_OUTPUT_GG[[5]]+ ggtitle("Susceptibility: Total Mortality per 100,000 (South Africa) "))/
+(SUS_OUTPUT_GG[[6]]+ ggtitle("Susceptibility: Total Mortality per 100,000 (United States) "))
+
+ggsave(
+  "SUS_MORT_JSU.png",
+  width = 10,
+  height = 14,
+  units = c("in"),
+  dpi = 300)
+
+```
+
+####SUSCEPTIBILITY-CASES- UNITED STATES
+```{r USA EVPI Susceptibility } 
+###We have conflicts on what the most optimal action is to reduce CASES in the United States when we have an R0 of 2.5 and the vacination rate of 0.287. 
+
+US_EVPI_SUS_Interest <- split(
+  subset(sus_l_h_df,
+    sus_l_h_df$Var11 == "USA" &
+      sus_l_h_df$Var10 == 2.5), seq(1, 27)
+)
+
+US_SUS_EVPI <- Simulator_func_C(US_EVPI_SUS_Interest)
+
+SUS_US_EVPI <- EVPI_Cases(US_SUS_EVPI, do.call(rbind, US_EVPI_SUS_Interest), 1, "sus1")
+
+
+(EVPI_SIMP_EASY(SUS_US_EVPI[[1]]))
+write.csv(EVPI_SIMP_EASY(SUS_US_EVPI[[1]]), file=
+"R/EVPI_SINGLE/USA_SUS_lowvac.csv")
+
+
+
+EVPI_SIMP_EASY(SUS_US_EVPI[[3]])
+write.csv(EVPI_SIMP_EASY(SUS_US_EVPI[[3]]), file=
+"R/EVPI_SINGLE/USA_SUS_highvac.csv")
+
+
+```
+
+```{r Japan EVPI Susceptibility} 
+###Japanese Susceptibility with Mortlaity - we have it with R0 of 1.15  and the vacrate of 0.287 and 0.69
+JPN_EVPI_SUS_Interest<- split(subset(sus_l_h_df,
+                      sus_l_h_df$Var11 == 'JPN'&
+                      sus_l_h_df$Var10==1.15 &
+                      sus_l_h_df$Var7!= 1.38),seq(1,18))
+
+JPN_SUS_EVPI <- Simulator_func_C(JPN_EVPI_SUS_Interest)
+
+JPN_SUS_EVPI <- EVPI_Mort(JPN_SUS_EVPI, do.call(rbind, JPN_EVPI_SUS_Interest), 1, "sus1")
+
+
+
+
+(EVPI_SIMP_EASY(JPN_SUS_EVPI[[1]]))
+write.csv(EVPI_SIMP_EASY(JPN_SUS_EVPI [[1]]), file=
+"/EVPI_SINGLE/JPN_SUS_lowvac.csv")
+
+(EVPI_SIMP_EASY(JPN_SUS_EVPI[[2]]))
+write.csv(EVPI_SIMP_EASY(JPN_SUS_EVPI [[2]]), file=
+"./OUTPUT_EVPI_SINGLE/JPN_SUS_medvac.csv")
+
+
+```
+
+### Transmissibility
+
+This is the transmissibility paramater that determines how the vaccine reduces transmissibility. A high reduction is 0.1 (90% reduction), a medium reduction is 0.5 (50% reduction) and 1 is a no reduction (0% reduction). This term appears in both the unvaccinated susceptible and vaccinated susceptible forces of infection. 
+
+
+####Output
+```{r Transmissibility output}
+
+TRANS_OUTPUT_GG <- grapher_output(
+ x= Minimizer_Highlighter(EQUAL_OUTPUT[[2]],'trans'),'trans','not')
+
+###Cases
+(TRANS_OUTPUT_GG[[1]]+ ggtitle("Transmissibility: Total Cases per 100,000 (Japan) "))/
+(TRANS_OUTPUT_GG[[2]]+ ggtitle("Transmissibility: Total Cases per 100,000 (South Africa) "))/
+(TRANS_OUTPUT_GG[[3]]+ ggtitle("Transmissibility:Total Cases per 100,000 (United States) "))
+
+ggsave(
+  "TRANS_CASES_JSU.png",
+  width = 10,
+  height = 14,
+  units = c("in"),
+  dpi = 300)
+
+###Mortality
+(TRANS_OUTPUT_GG[[4]]+ ggtitle("Transmissibility: Total Mortality per 100,000 (Japan) "))/
+(TRANS_OUTPUT_GG[[5]]+ ggtitle("Transmissibility: Total Mortality per 100,000 (South Africa) "))/
+(TRANS_OUTPUT_GG[[6]]+ ggtitle("Transmissibility: Total Mortality per 100,000 (United States) "))
+
+ggsave(
+  "TRANS_MORT_JSU.png",
+  width = 10,
+  height = 14,
+  units = c("in"),
+  dpi = 300)
+
+```
+
+###Severity
+
+The severity is the parameter that controls the probability of a vaccinated individual going to the asymptomatic state or the symptomatic state.
+
+For the 0.1, that means this is low severity (10% become symptomatic). For that 0.25, that means this is medium severity (25% become symptomatic). for that 0.50 that means this is still high severity (50% become symptomatic)
+
+
+####Output
+
+```{r output of severity}
+
+SEV_OUTPUT_GG <- grapher_output(Minimizer_Highlighter(EQUAL_OUTPUT[[3]],'sev') ,uncertainty='sev','not')
+
+###Cases
+(SEV_OUTPUT_GG[[1]]+ ggtitle("Severity: Total Cases per 100,000 (Japan) "))/
+(SEV_OUTPUT_GG[[2]]+ ggtitle("Severity: Total Cases per 100,000 (South Africa) "))/
+(SEV_OUTPUT_GG[[3]]+ ggtitle("Severity:Total Cases per 100,000 (United States) "))
+ggsave(
+  "SEV_CASES_JSU.png",
+  width = 10,
+  height = 14,
+  units = c("in"),
+  dpi = 300)
+
+###Mortality
+(SEV_OUTPUT_GG[[4]]+ ggtitle("Severity: Total Mortality per 100,000 (Japan) "))/
+(SEV_OUTPUT_GG[[5]]+ ggtitle("Severity: Total Mortality per 100,000 (South Africa) "))/
+(SEV_OUTPUT_GG[[6]]+ ggtitle("Severity: Total Mortality per 100,000 (United States) "))
+
+
+ggsave(
+  "SEV_MORT_JSU.png",
+  width = 10,
+  height = 14,
+  units = c("in"),
+  dpi = 300)
+```
+
+###Vaccinated Immunity (1)
+
+The vaccinated immunity parameter controls how fast the vaccinated, susceptibles individuals lose their immunity (SV-> S). 0 means life-long immuntiy, 0.5 means that they lose it in two year, 1 means that they lose it in one year, 2 means they lose it in six months
+
+
+####Output
+```{r}
+WV1_OUTPUT_GG <-
+  
+  grapher_output(Minimizer_Highlighter(EQUAL_OUTPUT[[5]] ,'wv1') ,uncertainty='wv1','vac')
+
+###Cases
+(WV1_OUTPUT_GG[[1]]+ ggtitle("Waning immunity (1): Total Cases per 100,000 (Japan) "))/
+(WV1_OUTPUT_GG[[2]]+ ggtitle("Waning immunity (1): Total Cases per 100,000 (South Africa) "))/
+(WV1_OUTPUT_GG[[3]]+ ggtitle("Waning immunity (1): Total Cases per 100,000 (USA) "))
+
+ggsave(
+  "WV1_CASES_JSU.png",
+  width = 10,
+  height = 14,
+  units = c("in"),
+  dpi = 300)
+
+#Mortality
+(WV1_OUTPUT_GG[[4]]+ ggtitle("Waning immunity (1): Total Mortality per 100,000 (Japan) "))/
+(WV1_OUTPUT_GG[[5]]+ ggtitle("Waning immunity (1): Total Mortality per 100,000 (South Africa) "))/
+(WV1_OUTPUT_GG[[6]]+ ggtitle("Waning immunity (1): Total Mortality per 100,000 (USA) "))
+
+ggsave(
+  "WV1_MORT_JSU.png",
+  width = 10,
+  height = 14,
+  units = c("in"),
+  dpi = 300)
+```
+
+###Vaccinated Waning of Immunity  2
+
+The vaccinated immunity parameter controls how fast the vaccinated, recovered individuals lose their immunity (RV-> SV). 0 means life-long immuntiy, 0.5 means that they lose it in two year, 1 means that they lose it in one year, 2 means they lose it in six months
+
+####Output
+```{r Output for waning of vaccine 2}
+WV2_OUTPUT_GG  <- grapher_output(Minimizer_Highlighter(EQUAL_OUTPUT[[6]],'wv2'),'wv2','vac')
+
+###Cases
+(WV2_OUTPUT_GG[[1]]+ ggtitle("Waning immunity (2): Total Cases per 100,000 (Japan) "))/
+(WV2_OUTPUT_GG[[2]]+ ggtitle("Waning immunity (2): Total Cases per 100,000 (South Africa) "))/
+(WV2_OUTPUT_GG[[3]]+ ggtitle("Waning immunity (2): Total Cases per 100,000 (USA) "))
+
+ggsave(
+  "WV2_CASES_JSU.png",
+  width = 10,
+  height = 14,
+  units = c("in"),
+  dpi = 300)
+
+###Mortality
+(WV2_OUTPUT_GG[[4]]+ ggtitle("Waning immunity (2): Total Mortality per 100,000 (Japan) "))/
+(WV2_OUTPUT_GG[[5]]+ ggtitle("Waning immunity (2): Total Mortality per 100,000 (South Africa) "))/
+(WV2_OUTPUT_GG[[6]]+ ggtitle("Waning immunity (2): Total Mortality per 100,000 (USA) "))
+
+ggsave(
+  "WV2_MORT_JSU.png",
+  width = 10,
+  height = 14,
+  units = c("in"),
+  dpi = 300)
+```
+
+
+
+###Natural Waning of immunity 
+
+The natural immunity parameter controls how fast the unvaccinated, recovered individuals lose their immunity (R-> S). 0 means life-long immuntiy, 0.5 means that they lose it in two year, 1 means that they lose it in one year, 2 means they lose it in six months
+
+```{r}
+WN_OUTPUT_GG <- grapher_output(Minimizer_Highlighter(EQUAL_OUTPUT[[4]] ,'wn') ,uncertainty='wn','vac')
+
+###Cases
+(WN_OUTPUT_GG[[1]]+ ggtitle("Waning immunity (N): Total Cases per 100,000 (Japan) "))/
+(WN_OUTPUT_GG[[2]]+ ggtitle("Waning immunity (N): Total Cases per 100,000 (South Africa) "))/
+(WN_OUTPUT_GG[[3]]+ ggtitle("Waning immunity (N): Total Cases per 100,000 (USA) "))
+
+ggsave(
+  "WN_CASES_JSU.png",
+  width = 10,
+  height = 14,
+  units = c("in"),
+  dpi = 300)
+
+###Mort
+(WN_OUTPUT_GG[[4]]+ ggtitle("Waning immunity (N): Total Mortality per 100,000 (Japan) "))/
+(WN_OUTPUT_GG[[5]]+ ggtitle("Waning immunity (N): Total Mortality per 100,000 (South Africa) "))/
+(WN_OUTPUT_GG[[6]]+ ggtitle("Waning immunity (N): Total Mortality per 100,000 (USA) "))
+
+ggsave(
+  "WN_MORT_JSU.png",
+  width = 10,
+  height = 14,
+  units = c("in"),
+  dpi = 300)
+
+```
+
+###Super grid expanded countries
+
+Instead of looking at one uncertainty at a time, now we run the model with all different combinations of the six uncertainties (it is a very large file because like combinatorics). This makes Figure 2
+
+The data set are all  found in the TSS_ALL_CREATOR FILE 
+
+For easier analysis, I decided to split it up by country-
+looked at United States (first)
+
+Var1 = Susceptibility
+Var2 = Transmissibility
+Var 3 = Severity
+Var 4 = Waning of Natural Immunity
+Var 5 = Waning of vaccine immunity 1
+Var 6 = Waning of vaccine immunity 2
+Var 7 = Vaccine rate 
+Var 8 = Vaccination coverage
+Var 9 = Priority group(the action)
+Var 10 = R0
+Var 11 = Country
+
+
+```{r TSS US ALL SPLIT}
+### This splits up the data based on the R0 (Var10) AND vaccine rate (Var7)
+
+TSS_US_ALL_SPLIT <- split(
+  TSS_US_ALL,
+  list(
+    TSS_US_ALL$Var10, # R0
+    TSS_US_ALL$Var7   # Vaccination rate
+  )
+)
+#################################################
+###This looks at the total EVPI across all the### uncertainties                         ###########
+#################################################
+
+TSS_EVPI_US <- lapply(TSS_US_ALL_SPLIT, function(x) EVPI_ALL_SUPER(x))
+
+### We add in the different R0 and vacrate
+EVPI_US_F <- cbind.data.frame(
+  R0 = rep(c(1.15, 1.5, 2.5), 3),
+  vacrate = rep(c(0.287, 0.69, 1.38), each = 3),
+  do.call(rbind, TSS_EVPI_US)
+)
+
+###This makes one part of the figure 
+###Cases for United States
+EVPI_US <- ggplot(EVPI_US_F, aes(x = as.factor(R0), y = abs(evpi))) +
+  geom_bar(stat = "identity", fill = "navyblue", color = "black", size = 1) +
+  facet_wrap(~vacrate) +
+  xlab("R0") +
+  ylab("EVPI (Cases)") +
+  theme_bw() +
+  ylim(0, 900) +
+  ggtitle("USA")
+
+
+###This makes one part of the figure 
+###Mortality for United States
+EVPI_US_M <- ggplot(EVPI_US_F, aes(x = as.factor(R0), y = abs(evpi_m))) +
+  geom_bar(stat = "identity", fill = "navyblue", color = "black") +
+  facet_wrap(~vacrate) +
+  xlab("R0") +
+  ylab("EVPI (Mortality)") +
+  theme_bw() +
+  ylim(0, 1)
+
+#Combine
+EVPI_US / EVPI_US_M                                                                                    
+```
+
+###South Africa (look above for comments )
+
+```{r South Afirca Total EVPI}
+TSS_SAF_ALL_SPLIT <- split(
+  TSS_SAF_ALL,
+  list(
+    TSS_SAF_ALL$Var10,
+    TSS_SAF_ALL$Var7
+  )
+)
+
+TSS_EVPI_SAF <- lapply(TSS_SAF_ALL_SPLIT, function(x) EVPI_ALL_SUPER(x))
+
+EVPI_SAF_F <- cbind.data.frame(
+  R0 = rep(c(1.15, 1.5, 2.5), 3),
+  vacrate = rep(c(0.287, 0.69, 1.38), each = 3),
+  do.call(rbind, TSS_EVPI_SAF)
+)
+
+EVPI_SAF <- ggplot(EVPI_SAF_F, aes(x = as.factor(R0), y = abs(evpi))) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  facet_wrap(~vacrate) +
+  xlab("R0") +
+  ylab("EVPI (Cases)") +
+  theme_bw() +
+  ylim(0, 900) +
+  ggtitle("South Africa")
+
+EVPI_SAF_M <- ggplot(EVPI_SAF_F, aes(x = as.factor(R0), y = abs(evpi_m))) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  facet_wrap(~vacrate) +
+  xlab("R0") +
+  ylab("EVPI (Mortality)") +
+  theme_bw() +
+  ylim(0, 1)
+
+EVPI_SAF / EVPI_SAF_M                                                                             
+```
+
+###JAPAN (look above for comments )
+
+```{r Total Jap Split}
+TSS_JPN_ALL_SPLIT <- split(
+  TSS_JPN_ALL,
+  list(
+    TSS_JPN_ALL$Var10,
+    TSS_JPN_ALL$Var7
+  )
+)
+
+TSS_EVPI_JPN <- lapply(TSS_JPN_ALL_SPLIT, function(x) EVPI_ALL_SUPER(x))
+
+EVPI_JPN_F <- cbind.data.frame(
+  R0 = rep(c(1.15, 1.5, 2.5), 3),
+  vacrate = rep(c(0.287, 0.69, 1.38), each = 3),
+  do.call(rbind, TSS_EVPI_JPN)
+)
+
+EVPI_JPN <- ggplot(EVPI_JPN_F, aes(x = as.factor(R0), y = abs(evpi))) +
+  geom_bar(stat = "identity", fill = "darkred") +
+  facet_wrap(~vacrate) +
+  xlab("R0") +
+  ylab("EVPI (Cases)") +
+  theme_bw() +
+  ylim(0, 900) +
+  ggtitle("Japan")
+
+EVPI_JPN_M <- ggplot(EVPI_JPN_F, aes(x = as.factor(R0), y = abs(evpi_m))) +
+  geom_bar(stat = "identity", fill = "darkred") +
+  facet_wrap(~vacrate) +
+  xlab("R0") +
+  ylab("EVPI (Mortality)") +
+  theme_bw() +
+  ylim(0, 1)
+
+EVPI_JPN / EVPI_JPN_M                                                                             
+
+```
+
+
+This is the figure skeleton for Figure 2
+```{r}
+(EVPI_JPN + EVPI_SAF + EVPI_US) / 
+(EVPI_JPN_M + EVPI_SAF_M + EVPI_US_M)
+```
+
+I put through illustrator
+
+###EVPXI (Expected value of partial perfect )
+
+For the expected value of partial perfect information
+I kept this in a seperate script                     
+You can find it as EVXI.R and this is used to create 
+FIGURE 3                                            
+
+
+FIN

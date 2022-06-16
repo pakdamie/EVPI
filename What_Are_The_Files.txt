@@ -1,0 +1,43 @@
+###########
+#Workflow##
+###########
+1) Source scripts that serve as functions
+2) Go through Main Analysis which should give you Figure 1 and 2
+3) Expected Value of Partial Perfect Information is in a different file
+
+####################
+###Main analysis ###
+####################
+Main_Analysis.RMD: All the analyses excluding the 
+expected value of partial perfect information
+
+output_related.R : For calculating the output 
+
+Model\FULL_MODEL_COVID19: The full mathematical model
+Model\SIMULATOR_MODEL: Function for simulating under different parameter values
+
+#################################
+###Single Uncertainty Analysis###
+#################################
+Simulator_Cases_NewPriors.R : For Figure 1
+
+########################
+###Full EVPI analysis###
+########################
+
+TSS_US_CREATOR.R: Shows how to create the full data.frame that 
+is used to analyze the EVPI for Figure 2
+
+\TSS_ALL_CREATOR
+TSS_JPN_ALL.RData, TSS_SAF_ALL.RData, and TSS_US_ALL.RData: The data
+used for analyzing the EVPI
+
+The other folders in this file is the raw 
+
+#################################################
+###Expected value of partial perfect information#
+##################################################
+EVPXI.R - Analysis related to partial perfect information- should
+make the graph for Figure 3
+
+
